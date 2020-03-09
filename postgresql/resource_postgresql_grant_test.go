@@ -2,11 +2,129 @@ package postgresql
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/lib/pq"
 )
+
+func TestCreateGrantQuery(t *testing.T) {
+	var databaseName string = "foo"
+	var roleName string = "bar"
+
+	cases := []struct {
+		resource   *schema.ResourceData
+		privileges []string
+		expected   string
+	}{
+		{
+			resource: schema.TestResourceDataRaw(t, resourcePostgreSQLGrant().Schema, map[string]interface{}{
+				"object_type": "table",
+				"schema":      databaseName,
+				"role":        roleName,
+			}),
+			privileges: []string{"SELECT"},
+			expected:   fmt.Sprintf("GRANT SELECT ON ALL TABLES IN SCHEMA %s TO %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(roleName)),
+		},
+		{
+			resource: schema.TestResourceDataRaw(t, resourcePostgreSQLGrant().Schema, map[string]interface{}{
+				"object_type": "sequence",
+				"schema":      databaseName,
+				"role":        roleName,
+			}),
+			privileges: []string{"SELECT"},
+			expected:   fmt.Sprintf("GRANT SELECT ON ALL SEQUENCES IN SCHEMA %s TO %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(roleName)),
+		},
+		{
+			resource: schema.TestResourceDataRaw(t, resourcePostgreSQLGrant().Schema, map[string]interface{}{
+				"object_type": "database",
+				"database":    databaseName,
+				"role":        roleName,
+			}),
+			privileges: []string{"CREATE"},
+			expected:   fmt.Sprintf("GRANT CREATE ON DATABASE %s TO %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(roleName)),
+		},
+		{
+			resource: schema.TestResourceDataRaw(t, resourcePostgreSQLGrant().Schema, map[string]interface{}{
+				"object_type": "database",
+				"database":    databaseName,
+				"role":        roleName,
+			}),
+			privileges: []string{"CREATE", "CONNECT"},
+			expected:   fmt.Sprintf("GRANT CREATE,CONNECT ON DATABASE %s TO %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(roleName)),
+		},
+		{
+			resource: schema.TestResourceDataRaw(t, resourcePostgreSQLGrant().Schema, map[string]interface{}{
+				"object_type":       "DATABASE",
+				"database":          databaseName,
+				"role":              roleName,
+				"with_grant_option": true,
+			}),
+			privileges: []string{"ALL PRIVILEGES"},
+			expected:   fmt.Sprintf("GRANT ALL PRIVILEGES ON DATABASE %s TO %s WITH GRANT OPTION", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(roleName)),
+		},
+	}
+
+	for _, c := range cases {
+		out := createGrantQuery(c.resource, c.privileges)
+		if !reflect.DeepEqual(out, c.expected) {
+			t.Fatalf("Error matching output and expected: %#v vs %#v", out, c.expected)
+		}
+	}
+}
+
+func TestCreateRevokeQuery(t *testing.T) {
+	var databaseName string = "foo"
+	var roleName string = "bar"
+
+	cases := []struct {
+		resource *schema.ResourceData
+		expected string
+	}{
+		{
+			resource: schema.TestResourceDataRaw(t, resourcePostgreSQLGrant().Schema, map[string]interface{}{
+				"object_type": "table",
+				"schema":      databaseName,
+				"role":        roleName,
+			}),
+			expected: fmt.Sprintf("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA %s FROM %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(roleName)),
+		},
+		{
+			resource: schema.TestResourceDataRaw(t, resourcePostgreSQLGrant().Schema, map[string]interface{}{
+				"object_type": "sequence",
+				"schema":      databaseName,
+				"role":        roleName,
+			}),
+			expected: fmt.Sprintf("REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %s FROM %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(roleName)),
+		},
+		{
+			resource: schema.TestResourceDataRaw(t, resourcePostgreSQLGrant().Schema, map[string]interface{}{
+				"object_type": "database",
+				"database":    databaseName,
+				"role":        roleName,
+			}),
+			expected: fmt.Sprintf("REVOKE ALL PRIVILEGES ON DATABASE %s FROM %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(roleName)),
+		},
+		{
+			resource: schema.TestResourceDataRaw(t, resourcePostgreSQLGrant().Schema, map[string]interface{}{
+				"object_type": "DATABASE",
+				"database":    databaseName,
+				"role":        roleName,
+			}),
+			expected: fmt.Sprintf("REVOKE ALL PRIVILEGES ON DATABASE %s FROM %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(roleName)),
+		},
+	}
+
+	for _, c := range cases {
+		out := createRevokeQuery(c.resource)
+		if !reflect.DeepEqual(out, c.expected) {
+			t.Fatalf("Error matching output and expected: %#v vs %#v", out, c.expected)
+		}
+	}
+}
 
 func TestAccPostgresqlGrant(t *testing.T) {
 	skipIfNotAcc(t)
